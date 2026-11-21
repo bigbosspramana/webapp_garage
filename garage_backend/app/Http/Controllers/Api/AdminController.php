@@ -4,7 +4,10 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Garage;
+use App\Models\Invoice;
+use App\Models\Sewa;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -330,5 +333,144 @@ class AdminController extends Controller
             'status' => 'success',
             'message' => "Garasi {$code} berhasil dihapus.",
         ], 200);
+    }
+
+    /**
+     * Mengambil daftar sewa garasi aktif (untuk perpanjangan di Layar 11).
+     */
+    public function getActiveRentals(Request $request): JsonResponse
+    {
+        if ($request->user()->role !== 'admin') {
+            return response()->json(['status' => 'error', 'message' => 'Akses ditolak.'], 403);
+        }
+
+        $activeRentals = Sewa::with(['user', 'vehicle', 'garage', 'invoices'])
+            ->where('status', 'aktif')
+            ->orderBy('end_date', 'asc')
+            ->get();
+
+        $formatted = $activeRentals->map(function ($s) {
+            $garage = $s->garage;
+            $user = $s->user;
+            $vehicle = $s->vehicle;
+
+            return [
+                'id' => $s->id,
+                'garage_id' => $s->garage_id,
+                'garage_code' => $garage ? $garage->code : '—',
+                'garage_type' => $garage ? $garage->type : '—',
+                'daily_price' => $garage ? (float) $garage->daily_price : 0,
+                'tenant_name' => $user ? $user->name : '—',
+                'tenant_email' => $user ? $user->email : '—',
+                'tenant_phone' => $user ? $user->phone : '—',
+                'vehicle_desc' => $vehicle ? "{$vehicle->brand} {$vehicle->model}" : '—',
+                'vehicle_type' => $vehicle ? $vehicle->type : '—',
+                'plate_number' => $vehicle ? $vehicle->plate_number : null,
+                'start_date_raw' => $s->start_date->format('Y-m-d'),
+                'start_date_formatted' => $s->start_date->translatedFormat('d M Y'),
+                'end_date_raw' => $s->end_date->format('Y-m-d'),
+                'end_date_formatted' => $s->end_date->translatedFormat('d M Y'),
+                'total_days' => $s->total_days,
+                'with_charging' => $s->with_charging,
+                'invoices_count' => $s->invoices->count(),
+            ];
+        });
+
+        return response()->json([
+            'status' => 'success',
+            'count' => $formatted->count(),
+            'data' => $formatted,
+        ], 200);
+    }
+
+    /**
+     * Memperpanjang masa sewa aktif dan menerbitkan Invoice baru (Layar 11).
+     */
+    public function extendRental(Request $request, int $id): JsonResponse
+    {
+        if ($request->user()->role !== 'admin') {
+            return response()->json(['status' => 'error', 'message' => 'Akses ditolak.'], 403);
+        }
+
+        $sewa = Sewa::with(['garage', 'user'])->find($id);
+        if (!$sewa) {
+            return response()->json(['status' => 'error', 'message' => 'Data sewa tidak ditemukan.'], 404);
+        }
+
+        if ($sewa->status !== 'aktif') {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Hanya sewa yang berstatus aktif yang dapat diperpanjang.',
+            ], 422);
+        }
+
+        $request->validate([
+            'new_end_date' => 'required|date|after:' . $sewa->end_date->format('Y-m-d'),
+            'payment_proof' => 'nullable|file|mimes:jpg,jpeg,png|max:5120',
+        ]);
+
+        $newEndDate = Carbon::parse($request->new_end_date);
+        $currentEndDate = Carbon::parse($sewa->end_date);
+        $diffDays = $currentEndDate->diffInDays($newEndDate, false);
+
+        if ($diffDays <= 0) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Tanggal selesai baru harus lebih besar dari tanggal selesai saat ini.',
+            ], 422);
+        }
+
+        $dailyPrice = (float) $sewa->garage->daily_price;
+        // R12: Biaya perpanjangan = tambahan hari × harga harian, tanpa biaya isi listrik lagi
+        $additionalRentalCost = $diffDays * $dailyPrice;
+        $totalAmount = $additionalRentalCost;
+
+        // Upload bukti pembayaran jika dilampirkan
+        $proofPath = null;
+        if ($request->hasFile('payment_proof')) {
+            $proofPath = $request->file('payment_proof')->store('payment_proofs', 'public');
+        }
+
+        return DB::transaction(function () use ($request, $sewa, $currentEndDate, $newEndDate, $diffDays, $additionalRentalCost, $totalAmount, $proofPath) {
+            // Generate nomor invoice berurut
+            $invoiceNumber = 'INV-' . date('Ymd') . '-' . str_pad(Invoice::count() + 1, 4, '0', STR_PAD_LEFT);
+
+            // Buat invoice baru tipe perpanjangan
+            $invoice = Invoice::create([
+                'sewa_id' => $sewa->id,
+                'invoice_number' => $invoiceNumber,
+                'type' => 'perpanjangan',
+                'period_start' => $currentEndDate,
+                'period_end' => $newEndDate,
+                'days' => $diffDays,
+                'rental_cost' => $additionalRentalCost,
+                'electricity_cost' => 0,
+                'total_amount' => $totalAmount,
+                'status' => 'verified',
+                'payment_proof_path' => $proofPath,
+                'created_by' => $request->user()->id,
+            ]);
+
+            // Perbarui tanggal selesai pada tabel sewa
+            $sewa->update([
+                'end_date' => $newEndDate,
+                'total_days' => $sewa->total_days + $diffDays,
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => "Sewa garasi {$sewa->garage->code} ({$sewa->user->name}) berhasil diperpanjang hingga {$newEndDate->translatedFormat('d M Y')}.",
+                'data' => [
+                    'sewa_id' => $sewa->id,
+                    'garage_code' => $sewa->garage->code,
+                    'tenant_name' => $sewa->user->name,
+                    'new_end_date' => $newEndDate->format('Y-m-d'),
+                    'new_end_date_formatted' => $newEndDate->translatedFormat('d M Y'),
+                    'additional_days' => $diffDays,
+                    'additional_amount' => $totalAmount,
+                    'invoice_number' => $invoice->invoice_number,
+                ],
+            ], 200);
+        });
     }
 }

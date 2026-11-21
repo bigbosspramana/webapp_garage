@@ -30,5 +30,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/garages/batch', [AdminController::class, 'batchCreateGarages']);
         Route::put('/garages/{id}', [AdminController::class, 'updateGarage']);
         Route::delete('/garages/{id}', [AdminController::class, 'deleteGarage']);
+
+        // Perpanjang Sewa Garasi (Layar 11)
+        Route::get('/active-rentals', [AdminController::class, 'getActiveRentals']);
+        Route::post('/rentals/{id}/extend', [AdminController::class, 'extendRental']);
     });
 });
