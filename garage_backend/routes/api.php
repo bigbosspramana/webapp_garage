@@ -19,10 +19,16 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
 
-    // Admin Verification Endpoints
+    // Admin Management Endpoints
     Route::prefix('admin')->group(function () {
         Route::get('/pending-users', [AdminController::class, 'getPendingUsers']);
         Route::post('/users/{id}/approve', [AdminController::class, 'approveUser']);
         Route::post('/users/{id}/reject', [AdminController::class, 'rejectUser']);
+
+        // CRUD & Batch Garasi
+        Route::get('/garages', [AdminController::class, 'getGarages']);
+        Route::post('/garages/batch', [AdminController::class, 'batchCreateGarages']);
+        Route::put('/garages/{id}', [AdminController::class, 'updateGarage']);
+        Route::delete('/garages/{id}', [AdminController::class, 'deleteGarage']);
     });
 });
