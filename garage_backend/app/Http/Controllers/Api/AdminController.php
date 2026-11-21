@@ -473,4 +473,211 @@ class AdminController extends Controller
             ], 200);
         });
     }
+
+    /**
+     * Mengambil data laporan: per bulan, per hari, per tipe, dan per penyewa (Layar 12, 13, 14).
+     */
+    public function getReports(Request $request): JsonResponse
+    {
+        if ($request->user()->role !== 'admin') {
+            return response()->json(['status' => 'error', 'message' => 'Akses ditolak.'], 403);
+        }
+
+        $type = $request->query('type', 'monthly'); // 'monthly' | 'daily' | 'garage_type' | 'tenant'
+        $year = (int) $request->query('year', date('Y'));
+        $month = (int) $request->query('month', date('n'));
+
+        if ($type === 'monthly') {
+            $monthNames = [
+                1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
+                5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
+                9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
+            ];
+
+            $monthlyData = [];
+            $maxRevenue = 0;
+
+            for ($m = 1; $m <= 12; $m++) {
+                $invoices = Invoice::whereYear('created_at', $year)
+                    ->whereMonth('created_at', $m)
+                    ->get();
+
+                $trxCount = $invoices->count();
+                $rev = (float) $invoices->sum('total_amount');
+
+                if ($rev > $maxRevenue) {
+                    $maxRevenue = $rev;
+                }
+
+                $monthlyData[] = [
+                    'month_num' => $m,
+                    'month_name' => $monthNames[$m],
+                    'transactions_count' => $trxCount,
+                    'revenue' => $rev,
+                ];
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'year' => $year,
+                'data' => $monthlyData,
+                'max_revenue' => $maxRevenue,
+                'total_revenue' => array_sum(array_column($monthlyData, 'revenue')),
+                'total_transactions' => array_sum(array_column($monthlyData, 'transactions_count')),
+            ], 200);
+        }
+
+        if ($type === 'daily') {
+            $daysInMonth = Carbon::createFromDate($year, $month, 1)->daysInMonth;
+            $dailyData = [];
+            $maxRevenue = 0;
+
+            for ($d = 1; $d <= $daysInMonth; $d++) {
+                $invoices = Invoice::whereYear('created_at', $year)
+                    ->whereMonth('created_at', $month)
+                    ->whereDay('created_at', $d)
+                    ->get();
+
+                $trxCount = $invoices->count();
+                $rev = (float) $invoices->sum('total_amount');
+
+                if ($rev > $maxRevenue) {
+                    $maxRevenue = $rev;
+                }
+
+                $dateStr = sprintf('%04d-%02d-%02d', $year, $month, $d);
+
+                $dailyData[] = [
+                    'day' => $d,
+                    'date' => $dateStr,
+                    'transactions_count' => $trxCount,
+                    'revenue' => $rev,
+                ];
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'year' => $year,
+                'month' => $month,
+                'days_in_month' => $daysInMonth,
+                'data' => $dailyData,
+                'max_revenue' => $maxRevenue,
+                'total_revenue' => array_sum(array_column($dailyData, 'revenue')),
+                'total_transactions' => array_sum(array_column($dailyData, 'transactions_count')),
+            ], 200);
+        }
+
+        if ($type === 'garage_type') {
+            $types = ['sepeda', 'mobil', 'mobil_listrik'];
+            $typeLabels = [
+                'sepeda' => 'Sepeda',
+                'mobil' => 'Mobil',
+                'mobil_listrik' => 'Mobil Listrik',
+            ];
+
+            $typeData = [];
+            $maxRevenue = 0;
+
+            foreach ($types as $t) {
+                // Invoices connected to sewa of this garage type
+                $invoices = Invoice::whereHas('sewa.garage', function ($q) use ($t) {
+                    $q->where('type', $t);
+                })->get();
+
+                $trxCount = $invoices->count();
+                $rev = (float) $invoices->sum('total_amount');
+
+                if ($rev > $maxRevenue) {
+                    $maxRevenue = $rev;
+                }
+
+                $typeData[] = [
+                    'type' => $t,
+                    'label' => $typeLabels[$t],
+                    'transactions_count' => $trxCount,
+                    'revenue' => $rev,
+                ];
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'data' => $typeData,
+                'max_revenue' => $maxRevenue,
+                'total_revenue' => array_sum(array_column($typeData, 'revenue')),
+                'total_transactions' => array_sum(array_column($typeData, 'transactions_count')),
+            ], 200);
+        }
+
+        if ($type === 'tenant') {
+            $search = $request->query('search', '');
+            $userId = $request->query('user_id');
+
+            // List penyewa untuk dropdown dan pencarian
+            $tenantsQuery = User::where('role', 'penyewa');
+            if ($search) {
+                $tenantsQuery->where(function ($q) use ($search) {
+                    $q->where('name', 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%");
+                });
+            }
+            $tenants = $tenantsQuery->get(['id', 'name', 'email', 'phone']);
+
+            $selectedUser = null;
+            if ($userId) {
+                $selectedUser = User::find($userId);
+            } elseif ($tenants->count() > 0) {
+                $selectedUser = $tenants->first();
+            }
+
+            $tenantReport = null;
+            if ($selectedUser) {
+                $sewaList = Sewa::with(['vehicle', 'garage', 'invoices'])
+                    ->where('user_id', $selectedUser->id)
+                    ->orderBy('created_at', 'desc')
+                    ->get();
+
+                $totalDays = (int) $sewaList->sum('total_days');
+                $totalPaid = 0;
+                $history = [];
+
+                foreach ($sewaList as $s) {
+                    $cost = (float) $s->invoices->sum('total_amount');
+                    $totalPaid += $cost;
+
+                    $history[] = [
+                        'id' => $s->id,
+                        'garage_code' => $s->garage ? $s->garage->code : '—',
+                        'garage_type' => $s->garage ? $s->garage->type : '—',
+                        'vehicle_name' => $s->vehicle ? "{$s->vehicle->brand} {$s->vehicle->model}" : '—',
+                        'plate_number' => $s->vehicle ? $s->vehicle->plate_number : null,
+                        'start_date' => $s->start_date->translatedFormat('d M Y'),
+                        'end_date' => $s->end_date->translatedFormat('d M Y'),
+                        'total_days' => $s->total_days,
+                        'total_cost' => $cost,
+                        'status' => $s->status,
+                    ];
+                }
+
+                $tenantReport = [
+                    'user' => [
+                        'id' => $selectedUser->id,
+                        'name' => $selectedUser->name,
+                        'email' => $selectedUser->email,
+                        'phone' => $selectedUser->phone,
+                    ],
+                    'total_days' => $totalDays,
+                    'total_paid' => $totalPaid,
+                    'history' => $history,
+                ];
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'tenants' => $tenants,
+                'selected_tenant' => $tenantReport,
+            ], 200);
+        }
+
+        return response()->json(['status' => 'error', 'message' => 'Tipe laporan tidak valid.'], 400);
+    }
 }

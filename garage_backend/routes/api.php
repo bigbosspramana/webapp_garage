@@ -34,5 +34,8 @@ Route::middleware('auth:sanctum')->group(function () {
         // Perpanjang Sewa Garasi (Layar 11)
         Route::get('/active-rentals', [AdminController::class, 'getActiveRentals']);
         Route::post('/rentals/{id}/extend', [AdminController::class, 'extendRental']);
+
+        // Laporan Sewa (Layar 12, 13, 14)
+        Route::get('/reports', [AdminController::class, 'getReports']);
     });
 });
