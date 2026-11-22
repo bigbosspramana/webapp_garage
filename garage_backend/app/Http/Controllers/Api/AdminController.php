@@ -406,7 +406,7 @@ class AdminController extends Controller
 
         $request->validate([
             'new_end_date' => 'required|date|after:' . $sewa->end_date->format('Y-m-d'),
-            'payment_proof' => 'nullable|file|mimes:jpg,jpeg,png|max:5120',
+            'payment_proof' => 'required|file|mimes:jpg,jpeg,png|max:5120',
         ]);
 
         $newEndDate = Carbon::parse($request->new_end_date);
@@ -528,6 +528,30 @@ class AdminController extends Controller
         }
 
         if ($type === 'daily') {
+            if ($request->has('date') && !empty($request->date)) {
+                $targetDate = Carbon::parse($request->date)->format('Y-m-d');
+                $invoices = Invoice::whereDate('created_at', $targetDate)
+                    ->orWhere(function ($q) use ($targetDate) {
+                        $q->whereDate('period_start', '<=', $targetDate)
+                          ->whereDate('period_end', '>=', $targetDate);
+                    })
+                    ->with(['sewa.user', 'sewa.vehicle', 'sewa.garage'])
+                    ->orderBy('created_at', 'desc')
+                    ->get();
+
+                $totalRev = (float) $invoices->sum('total_amount');
+                $totalCount = $invoices->count();
+
+                return response()->json([
+                    'status' => 'success',
+                    'date' => $targetDate,
+                    'date_formatted' => Carbon::parse($targetDate)->translatedFormat('d M Y'),
+                    'total_count' => $totalCount,
+                    'total_revenue' => $totalRev,
+                    'invoices' => $invoices,
+                ], 200);
+            }
+
             $daysInMonth = Carbon::createFromDate($year, $month, 1)->daysInMonth;
             $dailyData = [];
             $maxRevenue = 0;

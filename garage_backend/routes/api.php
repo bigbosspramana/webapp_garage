@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\RentalController;
 use App\Http\Controllers\Api\VehicleController;
 use Illuminate\Support\Facades\Route;
 
@@ -24,6 +25,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/vehicles', [VehicleController::class, 'index']);
     Route::post('/vehicles', [VehicleController::class, 'store']);
     Route::delete('/vehicles/{id}', [VehicleController::class, 'destroy']);
+
+    // Sewa Garasi Endpoints (Penyewa - Layar 5, 6, 7)
+    Route::get('/garages/available', [RentalController::class, 'getAvailableGarages']);
+    Route::get('/rentals', [RentalController::class, 'index']);
+    Route::post('/rentals', [RentalController::class, 'store']);
 
     // Admin Management Endpoints
     Route::prefix('admin')->group(function () {

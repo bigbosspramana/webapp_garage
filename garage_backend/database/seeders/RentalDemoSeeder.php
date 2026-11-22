@@ -87,36 +87,57 @@ class RentalDemoSeeder extends Seeder
             ]
         );
 
-        // 3. Data Garasi
-        $gE002 = Garage::firstOrCreate(
-            ['code' => 'E002'],
-            [
-                'type' => 'mobil_listrik',
-                'daily_price' => 50000,
-                'electricity_price_per_kwh' => 2500,
-                'status' => 'used',
-            ]
-        );
+        // 3. Data Garasi Multi-Lantai (48 slot = 12 lantai @ 4 slot/lantai)
+        $usedEvCodes = ['E002', 'E003', 'E007', 'E012', 'E017', 'E022', 'E027', 'E032', 'E037'];
+        $evGarages = [];
+        for ($i = 1; $i <= 48; $i++) {
+            $code = 'E' . str_pad($i, 3, '0', STR_PAD_LEFT);
+            $isUsed = in_array($code, $usedEvCodes);
+            $evGarages[$code] = Garage::firstOrCreate(
+                ['code' => $code],
+                [
+                    'type' => 'mobil_listrik',
+                    'daily_price' => 50000,
+                    'electricity_price_per_kwh' => 2500,
+                    'status' => $isUsed ? 'used' : 'available',
+                ]
+            );
+        }
+        $gE002 = $evGarages['E002'];
 
-        $gC005 = Garage::firstOrCreate(
-            ['code' => 'C005'],
-            [
-                'type' => 'mobil',
-                'daily_price' => 30000,
-                'electricity_price_per_kwh' => null,
-                'status' => 'used',
-            ]
-        );
+        $usedMobilCodes = ['C002', 'C005', 'C008', 'C015', 'C022', 'C030'];
+        $mobilGarages = [];
+        for ($i = 1; $i <= 48; $i++) {
+            $code = 'C' . str_pad($i, 3, '0', STR_PAD_LEFT);
+            $isUsed = in_array($code, $usedMobilCodes);
+            $mobilGarages[$code] = Garage::firstOrCreate(
+                ['code' => $code],
+                [
+                    'type' => 'mobil',
+                    'daily_price' => 30000,
+                    'electricity_price_per_kwh' => null,
+                    'status' => $isUsed ? 'used' : 'available',
+                ]
+            );
+        }
+        $gC005 = $mobilGarages['C005'];
 
-        $gS011 = Garage::firstOrCreate(
-            ['code' => 'S011'],
-            [
-                'type' => 'sepeda',
-                'daily_price' => 10000,
-                'electricity_price_per_kwh' => null,
-                'status' => 'used',
-            ]
-        );
+        $usedSepedaCodes = ['S003', 'S007', 'S011', 'S018', 'S025'];
+        $sepedaGarages = [];
+        for ($i = 1; $i <= 48; $i++) {
+            $code = 'S' . str_pad($i, 3, '0', STR_PAD_LEFT);
+            $isUsed = in_array($code, $usedSepedaCodes);
+            $sepedaGarages[$code] = Garage::firstOrCreate(
+                ['code' => $code],
+                [
+                    'type' => 'sepeda',
+                    'daily_price' => 10000,
+                    'electricity_price_per_kwh' => null,
+                    'status' => $isUsed ? 'used' : 'available',
+                ]
+            );
+        }
+        $gS011 = $sepedaGarages['S011'];
 
         // 4. Data Sewa Aktif
         $sewa1 = Sewa::firstOrCreate(
